@@ -34,11 +34,15 @@ namespace SniperPlugin
 
         private bool _firstLaunch;
 
+        private bool _stopPending;
+
         public override async Task<bool> Load(IEnumerable<IManager> managers) // Occurs when the plugin is loaded.
         {
             Logger.Enabled = true;
 
             _firstLaunch = true;
+
+            _stopPending = false;
 
             Logger.Write("Loading plugin...");
 
@@ -97,6 +101,18 @@ namespace SniperPlugin
         {
             _managers = managers;
             var enumerable = _managers as IList<IManager> ?? _managers.ToList();
+
+            if (enumerable.Count == 0)
+            {
+                var dialogResult2 = MessageBox.Show("No accounts selected. Do you want to stop sniping on all accounts?", "Confirmation", MessageBoxButtons.YesNo, MessageBoxIcon.Exclamation, MessageBoxDefaultButton.Button2);
+                if (dialogResult2 == DialogResult.Yes)
+                {
+                    _stopPending = true;
+                    Logger.Write("A stop is pending. Finishing up current snipes");
+                }
+                return;
+            }
+
             Logger.Write("Detected " + enumerable.Count + " selected accounts");
 
             var dialogResult = MessageBox.Show("Do you want to start sniping on " + enumerable.Count + " accounts?", "Confirmation", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
@@ -126,6 +142,7 @@ namespace SniperPlugin
 
         public async Task ParseAndSnipe(string message)
         {
+            if (_accounts.Count == 0) return;
             var i = 0;
             var parts = message.Split(' ');
             if (message.StartsWith("#")) i = 1;
@@ -199,6 +216,12 @@ namespace SniperPlugin
                 if (account.Requirements.Count != 0) continue;
                 _accounts.Remove(account);
                 Logger.Write(account.Manager.AccountName + " caught all needed pokemons");
+            }
+
+            if (_stopPending)
+            {
+                StopPlugin();
+                return;
             }
 
             if (sniped)
@@ -277,6 +300,12 @@ namespace SniperPlugin
                 _accounts.Add(account);
             }
             Logger.Write("Added " + newAccounts.Count + " accounts");
+        }
+
+        public void StopPlugin()
+        {
+            _accounts.Clear();
+            Logger.Write("Removed all accounts from sniping list");
         }
     }
 }
