@@ -1,6 +1,8 @@
 ﻿using GoPlugin;
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
@@ -9,7 +11,9 @@ using Discord;
 using Discord.WebSocket;
 using POGOProtos.Enums;
 using System.IO;
+using System.Text.RegularExpressions;
 using POGOProtos.Data;
+using SniperPlugin.Data;
 using SniperPlugin.Entities;
 
 namespace SniperPlugin
@@ -30,34 +34,39 @@ namespace SniperPlugin
         // Sniper Plugin variables
         private List<Account> _accounts;
 
+        private ObservableCollection<Coord> _duplicateLog;
+
         private const int Delay = 60000;
 
         private bool _firstLaunch;
 
         private bool _stopPending;
 
+
+
         public override async Task<bool> Load(IEnumerable<IManager> managers) // Occurs when the plugin is loaded.
         {
             Logger.Enabled = true;
-
-            _firstLaunch = true;
-
-            _stopPending = false;
-
             Logger.Write("Loading plugin...");
 
+            _firstLaunch = true;
+            _stopPending = false;
             _managers = managers;
-
             _accounts = new List<Account>();
-            Logger.Write("Initialized account list");
-
+            _duplicateLog = new ObservableCollection<Coord>();
             _client = new DiscordSocketClient();
-            Logger.Write("Initialized DiscordSocketClient");
+
+            // Make sure the list doesn't exceed 5 items
+            _duplicateLog.CollectionChanged += (sender, args) =>
+            {
+                if (args.Action != NotifyCollectionChangedAction.Add) return;
+                while (_duplicateLog.Count > 5) _duplicateLog.RemoveAt(0);
+            };
 
             // Hook into the MessageReceived event on DiscordSocketClient
             _client.MessageReceived += async (message) =>
             {
-                if (message.Author.IsBot)
+                if (message.Author.IsBot || message.Channel.Id == 282755515313029122)
                 {
                     if (message.Channel.Id == 278110430235197441 || // candies_vip
                         message.Channel.Id == 279813108938047488 || // candies
@@ -85,15 +94,13 @@ namespace SniperPlugin
                         message.Channel.Id == 262451314041159681 || // snorlax
                         message.Channel.Id == 262451373889683467 // lapras
                     )
-                        await ParseAndSnipe(message.Content);
+                        await Snipe(message);
                 }
             };
-            Logger.Write("Hooked into Pokedex100 channels");
 
             Logger.Write("Loaded plugin successfully");
 
             await Task.Delay(0);
-
             return true;
         }
 
@@ -105,11 +112,9 @@ namespace SniperPlugin
             if (enumerable.Count == 0)
             {
                 var dialogResult2 = MessageBox.Show("No accounts selected. Do you want to stop sniping on all accounts?", "Confirmation", MessageBoxButtons.YesNo, MessageBoxIcon.Exclamation, MessageBoxDefaultButton.Button2);
-                if (dialogResult2 == DialogResult.Yes)
-                {
-                    _stopPending = true;
-                    Logger.Write("A stop is pending. Finishing up current snipes");
-                }
+                if (dialogResult2 != DialogResult.Yes) return;
+                _stopPending = true;
+                Logger.Write("A stop is pending. Finishing up current snipes");
                 return;
             }
 
@@ -124,8 +129,9 @@ namespace SniperPlugin
             if (!_firstLaunch) return;
             _firstLaunch = false;
 
+            // ShadowBot's token: MjkyMTcyNDE0MzEyMjUxMzkz.C60K2Q.P9xtcvtb_YlwptpBwXyiFMSSfYs
+            // Mare's token: MjM5NDE2NzIxODE4MTI0Mjg5.C7FJ8A.-N7y-Jn3LvOhsUWG_kSu6ZgwA5U
             await _client.LoginAsync(TokenType.User, "MjM5NDE2NzIxODE4MTI0Mjg5.C7FJ8A.-N7y-Jn3LvOhsUWG_kSu6ZgwA5U");
-            //await _client.LoginAsync(TokenType.User, "MjkyMTcyNDE0MzEyMjUxMzkz.C60K2Q.P9xtcvtb_YlwptpBwXyiFMSSfYs");
             await _client.StartAsync();
             Logger.Write("Logged into Discord");
 
@@ -140,45 +146,64 @@ namespace SniperPlugin
             return true;
         }
 
-        public async Task ParseAndSnipe(string message)
+        public async Task<Coord> Parse(SocketMessage message)
         {
-            if (_accounts.Count == 0) return;
-            var i = 0;
-            var parts = message.Split(' ');
-            if (message.StartsWith("#")) i = 1;
+            if (_accounts.Count == 0) return null;
 
-            // Parse PokemonID
-            var name = parts[0 + i].Replace("*", "");
-            var pokemonId = (PokemonId)Enum.Parse(typeof(PokemonId), name);
+            var newCoord = new Coord();
 
-            // Parse lat,lon
-            var coords = parts[1 + i].Split(',');
-            var lat = double.Parse(coords[0], CultureInfo.InvariantCulture);
-            var lon = double.Parse(coords[1], CultureInfo.InvariantCulture);
-
-            // Parse IV
-            int iv;
-            if (parts[2 + i].Equals(":100:"))
+            var parts = message.Content.Split(' ');
+            foreach (var part in parts)
             {
-                iv = 100;
+                var partNew = part;
+                if (part.Contains("*")) partNew = part.Replace("*", "");
+
+                if (PokemonList.Get().Contains(partNew))
+                {
+                    newCoord.Pokemon = (PokemonId)Enum.Parse(typeof(PokemonId), partNew);
+                }
+                else if (Regex.IsMatch(partNew, @"^(\-?\d+(\.\d+)?),\s*(\-?\d+(\.\d+)?)$"))
+                {
+                    var coords = partNew.Split(',');
+                    newCoord.Lat = double.Parse(coords[0], CultureInfo.InvariantCulture);
+                    newCoord.Lon = double.Parse(coords[1], CultureInfo.InvariantCulture);
+                }
+                else if (Regex.IsMatch(partNew, @"^IV\d{1,2}$"))
+                {
+                    newCoord.Iv = int.Parse(partNew.Replace("IV", ""));
+                }
+                else if (partNew.Equals(":100:"))
+                {
+                    newCoord.Iv = 100;
+                }
+                //else if (Regex.IsMatch(partNew, @"^CP\d{1,4}$"))
+                //{
+                //    newCoord.Cp = int.Parse(partNew.Replace("CP", ""));
+                //}
             }
-            else
-            {
-                var strId = parts[2 + i].Substring(2);
-                iv = int.Parse(strId);
-            }
-            Logger.Write("Found a " + pokemonId.ToString() + " at " + lat + ", " + lon + " with IV: " + iv);
+
+            await Task.Delay(0);
+            if (!newCoord.Valid() || IsDuplicate(newCoord)) return null;
+            Logger.Write("Found a " + newCoord.Pokemon.ToString() + " at " + newCoord.Lat + ", " + newCoord.Lon + " with IV: " + newCoord.Iv + " (#" + message.Channel.Name + ")");
+            return newCoord;
+        }
+
+        public async Task Snipe(SocketMessage message)
+        {
+            var coord = await Parse(message);
+            if (coord == null) return;
 
             var sniped = false;
+
             // Start sniping
             foreach (var account in _accounts)
             {
                 foreach (var requirement in account.Requirements)
                 {
-                    if ((requirement.PokemonId != pokemonId && requirement.PokemonId != PokemonId.Missingno) || requirement.MinIv > iv) continue;
-                    account.SnipeResult = account.Manager.ManualSnipe(lat, lon, pokemonId);
+                    if ((requirement.PokemonId != coord.Pokemon && requirement.PokemonId != PokemonId.Missingno) || requirement.MinIv > coord.Iv) continue;
+                    account.SnipeResult = account.Manager.ManualSnipe(coord.Lat, coord.Lon, coord.Pokemon);
                     sniped = true;
-                    Logger.Write(account.Manager.AccountName + " starts sniping " + pokemonId.ToString() + "(IV: " + iv + ")");
+                    Logger.Write(account.Manager.AccountName + " starts sniping " + coord.Pokemon.ToString() + "(IV: " + coord.Iv + ")");
                 }
             }
 
@@ -189,9 +214,9 @@ namespace SniperPlugin
                 if (!account.SnipeResult.Result.Success) continue;
                 foreach (var requirement in account.Requirements)
                 {
-                    if (requirement.PokemonId != pokemonId) continue;
+                    if (requirement.PokemonId != coord.Pokemon) continue;
                     requirement.AmountCaught++;
-                    Logger.Write(account.Manager.AccountName + " successfully caught " + pokemonId.ToString() + "(IV: " + iv + "). Caught " + requirement.AmountCaught + "/" + requirement.CatchAmount);
+                    Logger.Write(account.Manager.AccountName + " successfully caught " + coord.Pokemon.ToString() + "(IV: " + coord.Iv + "). Caught " + requirement.AmountCaught + "/" + requirement.CatchAmount);
                 }
             }
 
@@ -205,12 +230,12 @@ namespace SniperPlugin
                     if (requirement.MinCp == 0)
                     {
                         account.Requirements.Remove(requirement);
-                        Logger.Write(account.Manager.AccountName + " caught enough " + pokemonId.ToString() + "s (" + requirement.AmountCaught + "/" + requirement.CatchAmount + ")");
+                        Logger.Write(account.Manager.AccountName + " caught enough " + coord.Pokemon.ToString() + "s (" + requirement.AmountCaught + "/" + requirement.CatchAmount + ")");
                     }
                     else if (CountPokemonCp(account.Manager.Pokemon, requirement.PokemonId, requirement.MinCp, requirement.CatchAmount))
                     {
                         account.Requirements.Remove(requirement);
-                        Logger.Write(account.Manager.AccountName + " caught enough " + pokemonId.ToString() + "s (" + requirement.AmountCaught + "/" + requirement.CatchAmount + ")");
+                        Logger.Write(account.Manager.AccountName + " caught enough " + coord.Pokemon.ToString() + "s (" + requirement.AmountCaught + "/" + requirement.CatchAmount + ")");
                     }
                 }
                 if (account.Requirements.Count != 0) continue;
@@ -233,14 +258,12 @@ namespace SniperPlugin
 
         public static bool CountPokemonCp(IEnumerable<PokemonData> pokemons, PokemonId pokemonId, int minCp, int catchAmount)
         {
-            //var count = 0;
-            //foreach (var pokemon in pokemons)
-            //{
-            //    if ((pokemon.PokemonId == pokemonId || pokemonId == PokemonId.Missingno) && minCp <= pokemon.Cp)
-            //        count++;
-            //}
-            //return count >= catchAmount;
             return pokemons.Count(pokemon => (pokemon.PokemonId == pokemonId || pokemonId == PokemonId.Missingno) && minCp <= pokemon.Cp) >= catchAmount;
+        }
+
+        public bool IsDuplicate(Coord newCoord)
+        {
+            return _duplicateLog.Any(coord => newCoord.Pokemon.Equals(coord.Pokemon) && Math.Abs(newCoord.Lat - coord.Lat) < 0.0001 && Math.Abs(newCoord.Lon - coord.Lon) < 0.0001);
         }
 
         public void LoadSettings()

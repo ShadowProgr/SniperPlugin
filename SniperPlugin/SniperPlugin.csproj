@@ -184,7 +184,9 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Data\PokemonList.cs" />
     <Compile Include="Entities\Account.cs" />
+    <Compile Include="Entities\Coord.cs" />
     <Compile Include="Entities\Requirement.cs" />
     <Compile Include="Logger.cs" />
     <Compile Include="Plugin.cs" />
