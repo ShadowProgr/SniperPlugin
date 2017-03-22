@@ -1,6 +1,6 @@
 # Sniper Plugin
 
-This is a 3rd party plugin made for GoManager by SLxTnT. It supports sniping Pok�mons posted on Pokedex100 discord server.
+This is a 3rd party plugin made for GoManager by SLxTnT. It supports sniping Pokémons posted on Pokedex100 discord server.
 
 ## Installation
 
@@ -34,12 +34,27 @@ Dragonite;3;80;0
 Tyranitar;5;80;2500
 ```
 
-You may also use this config to catch 50 Pok�mons that have 100IV
+You may also use this config to catch 50 Pokémons that have 100IV
 ```
 Any;50;100;0
 ```
 
+Adding the "request" parameter to config line will also request that Pokémon in #candies_vip channel
+```
+Togetic;5;0;1500;request
+```
 
+## Changelog
+
+```
+v1.1
+* Now able to request Pokémon in #candies_vip
+* Stop is now properly working
+* Remade parsing system
+
+v1.0
+* Initial release
+```
 
 ## Credits
 
