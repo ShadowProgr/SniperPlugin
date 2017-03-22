@@ -12,6 +12,7 @@ using Discord.WebSocket;
 using POGOProtos.Enums;
 using System.IO;
 using System.Text.RegularExpressions;
+using System.Threading;
 using POGOProtos.Data;
 using SniperPlugin.Data;
 using SniperPlugin.Entities;
@@ -22,26 +23,22 @@ namespace SniperPlugin
     {
         // GoManager variables
         public override string PluginName { get; set; } = "ShadowProgr's Sniper Plugin";
-
         public override IEnumerable<PluginDropDownItem> MenuItems { get; set; }
-
         private IEnumerable<IManager> _managers;
 
         // Discord.Net variables
         private DiscordSocketClient _client;
 
-
         // Sniper Plugin variables
         private List<Account> _accounts;
-
         private ObservableCollection<Coord> _duplicateLog;
-
-        private const int Delay = 60000;
-
+        private PokemonId _queuedRequest;
+        private CancellationTokenSource _mainToken;
+        private CancellationTokenSource _requestToken;
+        private int _snipeDelay;
+        private int _requestDelay;
         private bool _firstLaunch;
-
         private bool _stopPending;
-
 
 
         public override async Task<bool> Load(IEnumerable<IManager> managers) // Occurs when the plugin is loaded.
@@ -49,12 +46,19 @@ namespace SniperPlugin
             Logger.Enabled = true;
             Logger.Write("Loading plugin...");
 
-            _firstLaunch = true;
-            _stopPending = false;
             _managers = managers;
+
+            _client = new DiscordSocketClient();
+
             _accounts = new List<Account>();
             _duplicateLog = new ObservableCollection<Coord>();
-            _client = new DiscordSocketClient();
+            _queuedRequest = PokemonId.Missingno;
+            _mainToken = new CancellationTokenSource();
+            _requestToken = new CancellationTokenSource();
+            _snipeDelay = 1;
+            _requestDelay = 2;
+            _firstLaunch = true;
+            _stopPending = false;
 
             // Make sure the list doesn't exceed 5 items
             _duplicateLog.CollectionChanged += (sender, args) =>
@@ -101,6 +105,7 @@ namespace SniperPlugin
             Logger.Write("Loaded plugin successfully");
 
             await Task.Delay(0);
+            
             return true;
         }
 
@@ -135,8 +140,12 @@ namespace SniperPlugin
             await _client.StartAsync();
             Logger.Write("Logged into Discord");
 
+            await Task.Delay(TimeSpan.FromSeconds(5));
+
+            Request(_requestToken.Token);
+
             // Block this task until the program is exited.
-            await Task.Delay(-1);
+            await Task.Delay(-1, _mainToken.Token);
         }
 
         public override async Task<bool> Save() // Occurs when closing. Occurs after settings are saved
@@ -148,8 +157,6 @@ namespace SniperPlugin
 
         public async Task<Coord> Parse(SocketMessage message)
         {
-            if (_accounts.Count == 0) return null;
-
             var newCoord = new Coord();
 
             var parts = message.Content.Split(' ');
@@ -190,6 +197,8 @@ namespace SniperPlugin
 
         public async Task Snipe(SocketMessage message)
         {
+            if (_accounts.Count == 0) return;
+
             var coord = await Parse(message);
             if (coord == null) return;
 
@@ -203,7 +212,7 @@ namespace SniperPlugin
                     if ((requirement.PokemonId != coord.Pokemon && requirement.PokemonId != PokemonId.Missingno) || requirement.MinIv > coord.Iv) continue;
                     account.SnipeResult = account.Manager.ManualSnipe(coord.Lat, coord.Lon, coord.Pokemon);
                     sniped = true;
-                    Logger.Write(account.Manager.AccountName + " starts sniping " + coord.Pokemon.ToString() + "(IV: " + coord.Iv + ")");
+                    Logger.Write(account.Manager.AccountName + " starts sniping " + coord.Pokemon.ToString() + " (IV: " + coord.Iv + ")");
                 }
             }
 
@@ -216,7 +225,7 @@ namespace SniperPlugin
                 {
                     if (requirement.PokemonId != coord.Pokemon) continue;
                     requirement.AmountCaught++;
-                    Logger.Write(account.Manager.AccountName + " successfully caught " + coord.Pokemon.ToString() + "(IV: " + coord.Iv + "). Caught " + requirement.AmountCaught + "/" + requirement.CatchAmount);
+                    Logger.Write(account.Manager.AccountName + " successfully caught " + coord.Pokemon.ToString() + " (IV: " + coord.Iv + "). Caught " + requirement.AmountCaught + "/" + requirement.CatchAmount);
                 }
             }
 
@@ -251,8 +260,37 @@ namespace SniperPlugin
 
             if (sniped)
             {
-                Logger.Write("Waiting for " + Delay / 1000 + " seconds");
-                await Task.Delay(Delay);
+                Logger.Write("Waiting for " + _snipeDelay + " minute(s)");
+                await Task.Delay(TimeSpan.FromMinutes(_snipeDelay));
+            }
+
+            // Queue a request if empty
+            foreach (var account in _accounts)
+            {
+                foreach (var requirement in account.Requirements)
+                {
+                    if (!requirement.Snipe || _queuedRequest != PokemonId.Missingno) continue;
+                    _queuedRequest = requirement.PokemonId;
+                    return;
+                }
+            }
+        }
+        public async Task Request(CancellationToken token)
+        {
+            while (true)
+            {
+                if (_queuedRequest != PokemonId.Missingno)
+                {
+                    var channel = _client.GetChannel(278110430235197441) as ISocketMessageChannel;
+                    var sendMessageAsync = channel?.SendMessageAsync("?c " + _queuedRequest);
+                    Logger.Write("Requested a " + _queuedRequest.ToString());
+                    _queuedRequest = PokemonId.Missingno;
+                    await Task.Delay(TimeSpan.FromMinutes(_requestDelay), token);
+                }
+                else
+                {
+                    await Task.Delay(TimeSpan.FromMinutes(_requestDelay / 2.0), token);
+                }
             }
         }
 
@@ -311,7 +349,8 @@ namespace SniperPlugin
                             CatchAmount = catchAmount,
                             AmountCaught = 0,
                             MinIv = minIv,
-                            MinCp = minCp
+                            MinCp = minCp,
+                            Snipe = (parts.Length == 5)
                         });
                         Logger.Write("Added new requirement [" + pokemonId.ToString() + "; " + catchAmount + "; " + minIv + "; " + minCp + "] to account " + account.Manager.AccountName);
                     }
@@ -329,6 +368,11 @@ namespace SniperPlugin
         {
             _accounts.Clear();
             Logger.Write("Removed all accounts from sniping list");
+            _requestToken.Cancel();
+            _mainToken.Cancel();
+            Logger.Write("Stopped plugin");
+            _stopPending = false;
+            _firstLaunch = true;
         }
     }
 }

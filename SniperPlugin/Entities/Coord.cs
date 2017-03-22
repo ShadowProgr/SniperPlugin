@@ -15,8 +15,8 @@ namespace SniperPlugin.Entities
             Pokemon = PokemonId.Missingno;
             Lat = 0.0;
             Lon = 0.0;
-            Iv = -1;
-            //Cp = -1;
+            Iv = 0;
+            //Cp = 0;
         }
 
         public bool Valid()
