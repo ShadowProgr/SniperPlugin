@@ -9,6 +9,6 @@ namespace SniperPlugin.Entities
         public int AmountCaught { get; set; }
         public int MinIv { get; set; }
         public int MinCp { get; set; }
-        public bool Snipe { get; set; }
+        public bool Request { get; set; }
     }
 }

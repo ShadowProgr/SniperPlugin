@@ -105,7 +105,7 @@ namespace SniperPlugin
             Logger.Write("Loaded plugin successfully");
 
             await Task.Delay(0);
-            
+
             return true;
         }
 
@@ -202,6 +202,13 @@ namespace SniperPlugin
             var coord = await Parse(message);
             if (coord == null) return;
 
+            // Check if a stop is pending
+            if (_stopPending)
+            {
+                StopPlugin();
+                return;
+            }
+
             var sniped = false;
 
             // Start sniping
@@ -216,50 +223,46 @@ namespace SniperPlugin
                 }
             }
 
-            // Wait for sniping to finish
-            foreach (var account in _accounts)
-            {
-                account.SnipeResult.Wait();
-                if (!account.SnipeResult.Result.Success) continue;
-                foreach (var requirement in account.Requirements)
-                {
-                    if (requirement.PokemonId != coord.Pokemon) continue;
-                    requirement.AmountCaught++;
-                    Logger.Write(account.Manager.AccountName + " successfully caught " + coord.Pokemon.ToString() + " (IV: " + coord.Iv + "). Caught " + requirement.AmountCaught + "/" + requirement.CatchAmount);
-                }
-            }
-
-            // Check if requirements are fulfilled
-            foreach (var account in _accounts)
-            {
-                foreach (var requirement in account.Requirements)
-                {
-                    if (requirement.AmountCaught < requirement.CatchAmount) continue;
-
-                    if (requirement.MinCp == 0)
-                    {
-                        account.Requirements.Remove(requirement);
-                        Logger.Write(account.Manager.AccountName + " caught enough " + coord.Pokemon.ToString() + "s (" + requirement.AmountCaught + "/" + requirement.CatchAmount + ")");
-                    }
-                    else if (CountPokemonCp(account.Manager.Pokemon, requirement.PokemonId, requirement.MinCp, requirement.CatchAmount))
-                    {
-                        account.Requirements.Remove(requirement);
-                        Logger.Write(account.Manager.AccountName + " caught enough " + coord.Pokemon.ToString() + "s (" + requirement.AmountCaught + "/" + requirement.CatchAmount + ")");
-                    }
-                }
-                if (account.Requirements.Count != 0) continue;
-                _accounts.Remove(account);
-                Logger.Write(account.Manager.AccountName + " caught all needed pokemons");
-            }
-
-            if (_stopPending)
-            {
-                StopPlugin();
-                return;
-            }
-
             if (sniped)
             {
+                // Wait for sniping to finish
+                foreach (var account in _accounts)
+                {
+                    account.SnipeResult.Wait();
+                    if (!account.SnipeResult.Result.Success) continue;
+                    foreach (var requirement in account.Requirements)
+                    {
+                        if (requirement.PokemonId != coord.Pokemon) continue;
+                        requirement.AmountCaught++;
+                        Logger.Write(account.Manager.AccountName + " successfully caught " + coord.Pokemon.ToString() +
+                                     " (IV: " + coord.Iv + "). Caught " + requirement.AmountCaught + "/" +
+                                     requirement.CatchAmount);
+                    }
+                }
+
+                // Check if requirements are fulfilled
+                foreach (var account in _accounts)
+                {
+                    foreach (var requirement in account.Requirements)
+                    {
+                        if (requirement.AmountCaught < requirement.CatchAmount) continue;
+
+                        if (requirement.MinCp == 0)
+                        {
+                            account.Requirements.Remove(requirement);
+                            Logger.Write(account.Manager.AccountName + " caught enough " + coord.Pokemon.ToString() + "s (" + requirement.AmountCaught + "/" + requirement.CatchAmount + ")");
+                        }
+                        else if (CountPokemonCp(account.Manager.Pokemon, requirement.PokemonId, requirement.MinCp, requirement.CatchAmount))
+                        {
+                            account.Requirements.Remove(requirement);
+                            Logger.Write(account.Manager.AccountName + " caught enough " + coord.Pokemon.ToString() + "s (" + requirement.AmountCaught + "/" + requirement.CatchAmount + ")");
+                        }
+                    }
+                    if (account.Requirements.Count != 0) continue;
+                    _accounts.Remove(account);
+                    Logger.Write(account.Manager.AccountName + " caught all needed pokemons");
+                }
+
                 Logger.Write("Waiting for " + _snipeDelay + " minute(s)");
                 await Task.Delay(TimeSpan.FromMinutes(_snipeDelay));
             }
@@ -269,9 +272,13 @@ namespace SniperPlugin
             {
                 foreach (var requirement in account.Requirements)
                 {
-                    if (!requirement.Snipe || _queuedRequest != PokemonId.Missingno) continue;
-                    _queuedRequest = requirement.PokemonId;
-                    return;
+                    if (requirement.Request && _queuedRequest == PokemonId.Missingno)
+                    {
+                        _queuedRequest = requirement.PokemonId;
+                        Logger.Write(account.Manager.AccountName + " wants to request a " +
+                                     requirement.PokemonId.ToString() + ". Added to pending requests");
+                        return;
+                    }
                 }
             }
         }
@@ -283,12 +290,13 @@ namespace SniperPlugin
                 {
                     var channel = _client.GetChannel(278110430235197441) as ISocketMessageChannel;
                     var sendMessageAsync = channel?.SendMessageAsync("?c " + _queuedRequest);
-                    Logger.Write("Requested a " + _queuedRequest.ToString());
+                    Logger.Write("Requested a " + _queuedRequest.ToString() + ". Waiting for " + _requestDelay + " minute(s)");
                     _queuedRequest = PokemonId.Missingno;
                     await Task.Delay(TimeSpan.FromMinutes(_requestDelay), token);
                 }
                 else
                 {
+                    Logger.Write("No pending requests. Waiting for " + _requestDelay / 2.0 + " minute(s)");
                     await Task.Delay(TimeSpan.FromMinutes(_requestDelay / 2.0), token);
                 }
             }
@@ -350,7 +358,7 @@ namespace SniperPlugin
                             AmountCaught = 0,
                             MinIv = minIv,
                             MinCp = minCp,
-                            Snipe = (parts.Length == 5)
+                            Request = parts.Length == 5
                         });
                         Logger.Write("Added new requirement [" + pokemonId.ToString() + "; " + catchAmount + "; " + minIv + "; " + minCp + "] to account " + account.Manager.AccountName);
                     }
@@ -366,13 +374,12 @@ namespace SniperPlugin
 
         public void StopPlugin()
         {
-            _accounts.Clear();
-            Logger.Write("Removed all accounts from sniping list");
             _requestToken.Cancel();
-            _mainToken.Cancel();
-            Logger.Write("Stopped plugin");
             _stopPending = false;
             _firstLaunch = true;
+            _accounts.Clear();
+            Logger.Write("Removed all accounts from sniping list");
+            Logger.Write("Stopped plugin");
         }
     }
 }
