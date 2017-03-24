@@ -39,7 +39,7 @@ namespace SniperPlugin
         private int _requestDelay;
         private bool _firstLaunch;
         private bool _stopPending;
-
+        private bool _requesting;
 
         public override async Task<bool> Load(IEnumerable<IManager> managers) // Occurs when the plugin is loaded.
         {
@@ -59,6 +59,7 @@ namespace SniperPlugin
             _requestDelay = 2;
             _firstLaunch = true;
             _stopPending = false;
+            _requesting = false;
 
             // Make sure the list doesn't exceed 5 items
             _duplicateLog.CollectionChanged += (sender, args) =>
@@ -131,19 +132,23 @@ namespace SniperPlugin
             LoadSettings();
 
             Logger.Write("Currently sniping on " + _accounts.Count + " accounts");
-            if (!_firstLaunch) return;
-            _firstLaunch = false;
+            if (_firstLaunch)
+            {
+                _firstLaunch = false;
 
-            // ShadowBot's token: MjkyMTcyNDE0MzEyMjUxMzkz.C60K2Q.P9xtcvtb_YlwptpBwXyiFMSSfYs
-            // Mare's token: MjM5NDE2NzIxODE4MTI0Mjg5.C7FJ8A.-N7y-Jn3LvOhsUWG_kSu6ZgwA5U
-            await _client.LoginAsync(TokenType.User, "MjM5NDE2NzIxODE4MTI0Mjg5.C7FJ8A.-N7y-Jn3LvOhsUWG_kSu6ZgwA5U");
-            await _client.StartAsync();
-            Logger.Write("Logged into Discord");
+                // ShadowBot's token: MjkyMTcyNDE0MzEyMjUxMzkz.C60K2Q.P9xtcvtb_YlwptpBwXyiFMSSfYs
+                // Mare's token: MjM5NDE2NzIxODE4MTI0Mjg5.C7FJ8A.-N7y-Jn3LvOhsUWG_kSu6ZgwA5U
+                await _client.LoginAsync(TokenType.User, "MjM5NDE2NzIxODE4MTI0Mjg5.C7FJ8A.-N7y-Jn3LvOhsUWG_kSu6ZgwA5U");
+                await _client.StartAsync();
+                Logger.Write("Logged into Discord");
 
-            await Task.Delay(TimeSpan.FromSeconds(5));
-
-            Request(_requestToken.Token);
-
+                await Task.Delay(TimeSpan.FromSeconds(5));
+            }
+            if (!_requesting)
+            {
+                _requesting = true;
+                Request(_requestToken.Token);
+            }
             // Block this task until the program is exited.
             await Task.Delay(-1, _mainToken.Token);
         }
@@ -376,7 +381,8 @@ namespace SniperPlugin
         {
             _requestToken.Cancel();
             _stopPending = false;
-            _firstLaunch = true;
+            _requesting = false;
+            _requestToken = new CancellationTokenSource();
             _accounts.Clear();
             Logger.Write("Removed all accounts from sniping list");
             Logger.Write("Stopped plugin");
