@@ -141,9 +141,8 @@ namespace SniperPlugin
                 _running = true;
 
                 RequestTaskAsync();
+                await Task.Delay(TimeSpan.FromMinutes(_snipeDelay));
                 SnipeTaskAsync();
-                
-                
             }
             // Block this task until the program is exited.
             await Task.Delay(-1);
@@ -221,33 +220,38 @@ namespace SniperPlugin
         {
             while (_running && _accounts.Count > 0)
             {
+                var snipeResults = new List<Task<MethodResult>>();
+
                 // Start sniping
                 foreach (var account in _accounts)
                 {
                     if (account.SnipeQueue.Count == 0) continue;
                     var coord = account.SnipeQueue.Last();
-                    account.SnipeResult = account.Manager.ManualSnipe(coord.Lat, coord.Lon, coord.Pokemon);
-                    Logger.Write(account.Manager.AccountName + " starts sniping " + coord.Pokemon + " (IV: " + coord.Iv + ")", Logger.Type.SnipeThread);
+                    var result = account.Manager.ManualSnipe(coord.Lat, coord.Lon, coord.Pokemon);
+                    //Logger.Write(result.Status + "", Logger.Type.SnipeThread);
+                    result.Wait();
+                    //account.SnipeResult = account.Manager.ManualSnipe(coord.Lat, coord.Lon, coord.Pokemon);
+                    //Logger.Write(account.Manager.AccountName + " starts sniping " + coord.Pokemon + " (IV: " + coord.Iv + ")", Logger.Type.SnipeThread);
                 }
 
                 // Wait for sniping to finish
-                foreach (var account in _accounts)
-                {
-                    if (account.SnipeQueue.Count == 0) continue;
-                    var coord = account.SnipeQueue.Last();
-                    account.SnipeQueue.Remove(coord);
-                    Logger.Write("Waiting for " + account.Manager.AccountName + ". Status: " + account.SnipeResult.Status.ToString(), Logger.Type.SnipeThread);
-                    //account.SnipeResult.Wait();
-                    if (!account.SnipeResult.Result.Success) continue;
-                    foreach (var requirement in account.Requirements)
-                    {
-                        if (requirement.PokemonId != coord.Pokemon) continue;
-                        requirement.AmountCaught++;
-                        Logger.Write(
-                            account.Manager.AccountName + " successfully caught " + coord.Pokemon + " (IV: " + coord.Iv + "). Caught " + requirement.AmountCaught +
-                            "/" + requirement.CatchAmount, Logger.Type.SnipeThread);
-                    }
-                }
+                //foreach (var account in _accounts)
+                //{
+                //    if (account.SnipeQueue.Count == 0) continue;
+                //    var coord = account.SnipeQueue.Last();
+                //    account.SnipeQueue.Remove(coord);
+                //    Logger.Write("Waiting for " + account.Manager.AccountName + ". Status: " + account.SnipeResult.Status.ToString(), Logger.Type.SnipeThread);
+                //    //account.SnipeResult.Wait();
+                //    if (!account.SnipeResult.Result.Success) continue;
+                //    foreach (var requirement in account.Requirements)
+                //    {
+                //        if (requirement.PokemonId != coord.Pokemon) continue;
+                //        requirement.AmountCaught++;
+                //        Logger.Write(
+                //            account.Manager.AccountName + " successfully caught " + coord.Pokemon + " (IV: " + coord.Iv + "). Caught " + requirement.AmountCaught +
+                //            "/" + requirement.CatchAmount, Logger.Type.SnipeThread);
+                //    }
+                //}
 
                 // Check if requirements are fulfilled
                 foreach (var account in _accounts)
@@ -287,20 +291,20 @@ namespace SniperPlugin
         {
             while (_running)
             {
-                if (_queuedRequest != PokemonId.Missingno)
-                {
-                    var channel = _client.GetChannel(278110430235197441) as ISocketMessageChannel;
-                    channel?.SendMessageAsync("?c " + _queuedRequest);
-                    Logger.Write("Requested a " + _queuedRequest + ". Waiting for " + _requestDelay + " minute(s)",
-                        Logger.Type.RequestThread);
-                    _queuedRequest = PokemonId.Missingno;
-                    await Task.Delay(TimeSpan.FromMinutes(_requestDelay));
-                }
-                else
+                QueueNextRequest();
+                if (_queuedRequest == PokemonId.Missingno)
                 {
                     Logger.Write("No pending requests. Waiting for " + _requestDelay / 2.0 + " minute(s)", Logger.Type.RequestThread);
                     await Task.Delay(TimeSpan.FromMinutes(_requestDelay / 2.0));
+                    continue;
                 }
+                if (_queuedRequest == PokemonId.Missingno) continue;
+                var channel = _client.GetChannel(278110430235197441) as ISocketMessageChannel;
+                channel?.SendMessageAsync("?c " + _queuedRequest);
+                Logger.Write("Requested a " + _queuedRequest + ". Waiting for " + _requestDelay + " minute(s)",
+                    Logger.Type.RequestThread);
+                _queuedRequest = PokemonId.Missingno;
+                await Task.Delay(TimeSpan.FromMinutes(_requestDelay));
             }
             _queuedRequest = PokemonId.Missingno;
             Logger.Write("Stopped requesting", Logger.Type.RequestThread);
