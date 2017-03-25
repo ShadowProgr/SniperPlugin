@@ -86,6 +86,7 @@ namespace SniperPlugin
                         message.Channel.Id == 259747484333637632 || // 90gold
                         message.Channel.Id == 252811322109067267 || // 90bronze
                         message.Channel.Id == 261331571028656128 || // 90community
+                        message.Channel.Id == 294336747393908736 || // 100shiny_maybe
                         message.Channel.Id == 282872644586700800 || // 2900cp
                         message.Channel.Id == 279399790729494529 || // 2800cp
                         message.Channel.Id == 282872847058075648 || // 2700cp
