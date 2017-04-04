@@ -144,14 +144,18 @@ namespace SniperPlugin
                 Logger.Write("Logged into Discord");
 
                 await Task.Delay(TimeSpan.FromSeconds(5));
+
+                _requesting = true;
+                Request(_requestToken.Token);
+
+                // Block this task until the program is exited.
+                await Task.Delay(-1, _mainToken.Token);
             }
             if (!_requesting)
             {
                 _requesting = true;
                 Request(_requestToken.Token);
             }
-            // Block this task until the program is exited.
-            await Task.Delay(-1, _mainToken.Token);
         }
 
         public override async Task<bool> Save() // Occurs when closing. Occurs after settings are saved
@@ -385,6 +389,7 @@ namespace SniperPlugin
             _requesting = false;
             _requestToken = new CancellationTokenSource();
             _accounts.Clear();
+            _accounts = new List<Account>;
             Logger.Write("Removed all accounts from sniping list");
             Logger.Write("Stopped plugin");
         }
